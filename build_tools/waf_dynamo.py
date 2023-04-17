@@ -965,9 +965,12 @@ ANDROID_STUB = """
 struct android_app;
 
 extern void _glfwPreMain(struct android_app* state);
+extern void app_dummy();
 
 void android_main(struct android_app* state)
 {
+    // Make sure glue isn't stripped.
+    app_dummy();
     _glfwPreMain(state);
 }
 """
