@@ -72,6 +72,8 @@ This is a known limitation on Android.
 
 **NOTE:** Never ever package compiled **R*.class-files** with third party libraries as it doesn't work in general.
 
+**NOTE2:** We use default `android_native_app_glue.c` from the NDK copied into `engine/glfw/lib/android` folder
+
 ### Android testing
 
 Copy executable (or directory) with
