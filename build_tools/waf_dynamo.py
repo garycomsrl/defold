@@ -1112,10 +1112,6 @@ def copy_stub(task):
     with open(task.outputs[0].abspath(), 'w') as out_f:
         out_f.write(ANDROID_STUB)
 
-    with open(task.glue_file, 'rb') as in_f:
-         with open(task.outputs[1].abspath(), 'wb') as out_f:
-             out_f.write(in_f.read())
-
     return 0
 
 task = Task.task_factory('copy_stub',
@@ -1134,11 +1130,8 @@ def create_copy_glue(self):
 
     stub = self.path.get_bld().find_or_declare('android_stub.c')
     self.source.append(stub)
-    glue = self.path.find_or_declare('android_native_app_glue.c')
-    self.source.append(glue)
     task = self.create_task('copy_stub')
-    task.glue_file = '%s/sources/android/native_app_glue/android_native_app_glue.c' % (ANDROID_NDK_ROOT)
-    task.set_outputs([stub, glue])
+    task.set_outputs([stub])
 
 def embed_build(task):
     symbol = task.inputs[0].name.upper().replace('.', '_').replace('-', '_').replace('@', 'at')
