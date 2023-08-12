@@ -55,25 +55,36 @@
         [])
       (:animation-ids animation-set-info))))
 
-(g/defnk produce-pb-msg [name mesh material textures skeleton animations default-animation]
+
+(defn- make-material [name material-res textures]
+  {:name name
+   :material material-res
+   :textures textures})
+
+(defn- make-texture [texture-res]
+  {:sampler ""
+   :texture texture-res})
+
+(defn- produce-materials-msg [materials material-ids]
+  (map-indexed (fn [i id]
+                 (let [material-res (get materials i)
+                       textures []]
+                   (make-material id (resource/resource->proj-path material-res) textures)))
+               material-ids))
+
+(def my-atom (atom 0))
+
+(g/defnk produce-pb-msg [name mesh material materials material-ids textures skeleton animations default-animation]
+  (reset! my-atom (mapv second materials))
   (cond-> {:mesh (resource/resource->proj-path mesh)
            :material (resource/resource->proj-path material)
+           :materials (produce-materials-msg materials material-ids)
            :textures (mapv resource/resource->proj-path textures)
            :skeleton (resource/resource->proj-path skeleton)
            :animations (resource/resource->proj-path animations)
            :default-animation default-animation}
     (not (str/blank? name))
     (assoc :name name)))
-
-
-(defn- make-texture [texture-res]
-  {:sampler ""
-   :texture texture-res})
-
-(defn- make-material [name material-res textures]
-  {:name name
-   :material material-res
-   :textures textures})
 
 (defn- build-pb [resource dep-resources user-data]
   (let [pb  (:pb user-data)
@@ -171,6 +182,49 @@
         v (if (<= c i) (into v (repeat (- i c) nil)) v)]
     (assoc v i value)))
 
+(defn- produce-texture-properties [_node-id _declared-properties textures samplers]
+  (let [resource-type (get-in _declared-properties [:properties :material :type])
+        prop-entry {:node-id _node-id
+                    :type resource-type
+                    :edit-type {:type resource/Resource
+                                :ext (conj image/exts "cubemap")}}
+        keys (map :name samplers)
+        properties (->> keys
+               (map-indexed (fn [i s]
+                              [(keyword (format "texture%d" i))
+                               (-> prop-entry
+                                   (assoc :value (get textures i)
+                                          :label s)
+                                   (assoc-in [:edit-type :set-fn]
+                                             (fn [_evaluation-context self old-value new-value]
+                                               (g/update-property self :textures vset i new-value))))])))]
+    properties))
+
+(defn- produce-material-properties [_node-id materials material-ids]
+  (println 'produce-material-properties material-ids)
+  (let [material-properties
+        (map-indexed (fn [i material-id]
+                       (let [prop {:node-id _node-id
+                                   :type g/Any
+                                   :edit-type {:type resource/Resource
+                                               :ext "material"
+                                               :set-fn (fn [_evaluation-context self old-value new-value]
+                                                         (g/update-property self :materials vset i new-value))}
+                                   :label material-id
+                                   :value (get materials i)}]
+                         [(keyword material-id) prop]))
+                     material-ids)]
+    material-properties))
+
+(g/defnk produce-properties [_node-id _declared-properties materials material-ids textures samplers]
+  (let [texture-properties (produce-texture-properties _node-id _declared-properties textures samplers)
+        material-properties (produce-material-properties _node-id materials material-ids)]
+    (-> _declared-properties
+        (update :properties into texture-properties)
+        (update :display-order into (map first texture-properties))
+        (update :properties into material-properties)
+        (update :display-order into (map first material-properties)))))
+
 (g/defnk produce-bones [skeleton-bones animations-bones]
   (or animations-bones skeleton-bones))
 
@@ -184,6 +238,7 @@
                    (project/resource-setter evaluation-context self old-value new-value
                                             [:resource :mesh-resource]
                                             [:aabb :aabb]
+                                            [:material-ids :material-ids]
                                             [:mesh-set-build-target :mesh-set-build-target]
                                             [:scene :scene])))
             (dynamic error (g/fnk [_node-id mesh]
@@ -203,6 +258,9 @@
                                   (prop-resource-error :fatal _node-id :material material "Material")))
             (dynamic edit-type (g/constantly {:type resource/Resource
                                               :ext "material"})))
+
+  (property materials resource/ResourceVec)
+
   (property textures resource/ResourceVec
             (value (gu/passthrough texture-resources))
             (set (fn [evaluation-context self old-value new-value]
@@ -253,6 +311,7 @@
   (input mesh-resource resource/Resource)
   (input mesh-set-build-target g/Any)
   (input material-resource resource/Resource)
+  (input material-ids g/Any)
   (input samplers g/Any)
   (input skeleton-resource resource/Resource)
   (input skeleton-build-target g/Any)
@@ -290,25 +349,7 @@
   (output gpu-textures g/Any :cached produce-gpu-textures)
   (output scene g/Any :cached produce-scene)
   (output aabb AABB (gu/passthrough aabb))
-  (output _properties g/Properties :cached (g/fnk [_node-id _declared-properties textures samplers]
-                                                  (let [resource-type (get-in _declared-properties [:properties :material :type])
-                                                        prop-entry {:node-id _node-id
-                                                                    :type resource-type
-                                                                    :edit-type {:type resource/Resource
-                                                                                :ext (conj image/exts "cubemap")}}
-                                                        keys (map :name samplers)
-                                                        p (->> keys
-                                                               (map-indexed (fn [i s]
-                                                                              [(keyword (format "texture%d" i))
-                                                                               (-> prop-entry
-                                                                                   (assoc :value (get textures i)
-                                                                                          :label s)
-                                                                                   (assoc-in [:edit-type :set-fn]
-                                                                                             (fn [_evaluation-context self old-value new-value]
-                                                                                               (g/update-property self :textures vset i new-value))))])))]
-                                                    (-> _declared-properties
-                                                        (update :properties into p)
-                                                        (update :display-order into (map first p)))))))
+  (output _properties g/Properties :cached produce-properties))
 
 (defn load-model [project self resource pb]
   ; TODO: Migrate the single "material" into "materials"
