@@ -353,15 +353,23 @@
 
 (defn load-model [project self resource pb]
   ; TODO: Migrate the single "material" into "materials"
-  (concat
+  (let [materials (into {}
+                        (map-indexed (fn [i material-desc]
+                                       (let [material-res (workspace/resolve-resource resource (:material material-desc))]
+                                         {i material-res}))
+                                     (:materials pb)))
+        #_(mapv (fn [material-desc] (:material material-desc) ) (:materials pb))]
+    (println "LOAD_MODEL" materials)
+   (concat
     (g/set-property self :name (:name pb) :default-animation (:default-animation pb))
+    (g/set-property self :materials materials)
     (for [res [:mesh :material [:textures] :skeleton :animations]]
       (if (vector? res)
         (let [res (first res)]
           (g/set-property self res (mapv #(workspace/resolve-resource resource %) (get pb res))))
         (->> (get pb res)
           (workspace/resolve-resource resource)
-          (g/set-property self res))))))
+          (g/set-property self res)))))))
 
 (defn register-resource-types [workspace]
   (resource-node/register-ddf-resource-type workspace
