@@ -181,6 +181,7 @@
                                                           (:view render-args)
                                                           (:projection render-args)
                                                           (:texture render-args)))]
+    (println "WUT??" textures)
     (gl/with-gl-bindings gl render-args [shader]
       (doseq [[name t] textures]
         (gl/bind gl t render-args)
