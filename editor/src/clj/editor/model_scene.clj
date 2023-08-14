@@ -181,7 +181,6 @@
                                                           (:view render-args)
                                                           (:projection render-args)
                                                           (:texture render-args)))]
-    (println "WUT??" textures)
     (gl/with-gl-bindings gl render-args [shader]
       (doseq [[name t] textures]
         (gl/bind gl t render-args)
@@ -315,7 +314,7 @@
   (:bones content))
 
 (g/defnk produce-content [_node-id resource]
-      (model-loader/load-scene _node-id resource))
+  (model-loader/load-scene _node-id resource))
 
 (g/defnk produce-animation-info [resource]
   [{:path (resource/proj-path resource) :parent-id "" :resource resource}])

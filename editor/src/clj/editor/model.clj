@@ -61,22 +61,27 @@
    :material material-res
    :textures textures})
 
-(defn- make-texture [texture-res]
-  {:sampler ""
+(defn- make-texture
+  [texture-res sampler]
+  {:sampler sampler
    :texture texture-res})
 
-(defn- produce-materials-msg [materials material-ids]
-  (map-indexed (fn [i id]
-                 (let [material-res (get materials i)
-                       textures []]
+(defn- produce-materials-msg [materials material-ids textures samplers]
+  (map-indexed (fn [material-index id]
+                 (let [material-res (get materials material-index)
+                       material-textures (get textures material-index)
+                       material-samplers (get samplers material-index)
+                       textures (mapv (fn [texture-index]
+                                        (let [texture-res (get material-textures texture-index)
+                                              sampler (get material-samplers texture-index)]
+                                          (make-texture (resource/resource->proj-path texture-res) (:name sampler))))
+                                      (range (count material-textures)))]
                    (make-material id (resource/resource->proj-path material-res) textures)))
                material-ids))
 
-(g/defnk produce-pb-msg [name mesh materials material-ids textures skeleton animations default-animation]
+(g/defnk produce-pb-msg [name mesh materials material-ids textures skeleton samplers animations default-animation]
   (cond-> {:mesh (resource/resource->proj-path mesh)
-           #_#_:material (resource/resource->proj-path material)
-           :materials (produce-materials-msg materials material-ids)
-           #_#_:textures (mapv resource/resource->proj-path textures)
+           :materials (produce-materials-msg materials material-ids textures samplers)
            :skeleton (resource/resource->proj-path skeleton)
            :animations (resource/resource->proj-path animations)
            :default-animation default-animation}
@@ -93,12 +98,8 @@
                     (map (fn [[label res]]
                            [label (resource/proj-path (get dep-resources res))])
                          (:dep-resources user-data)))
-        textures (mapv make-texture (:textures pb))
-        material (make-material "default" (:material pb) textures)
-        material (make-material "default" (:material pb) textures)
-        ;; TODO!
-        #_#_pb (assoc pb :materials [material])
-        #_#_pb (dissoc pb :material :textures)]
+        ;; Deprecated fields
+        pb (dissoc pb :material :textures)]
     {:resource resource :content (protobuf/map->bytes ModelProto$Model pb)}))
 
 (defn- prop-resource-error [nil-severity _node-id prop-kw prop-value prop-name]
@@ -134,9 +135,12 @@
             rig-scene-pb-msg {:texture-set ""} ; Set in the ModelProto$Model message. Other field values taken from build targets.
             rig-scene-additional-resource-keys []
             rig-scene-build-targets (rig/make-rig-scene-build-targets _node-id rig-scene-resource rig-scene-pb-msg dep-build-targets rig-scene-additional-resource-keys rig-scene-dep-build-targets)
-            pb-msg (select-keys pb-msg [#_:material :textures :default-animation])
+            pb-msg (select-keys pb-msg [:materials :textures :default-animation])
             dep-build-targets (into rig-scene-build-targets (flatten dep-build-targets))
-            deps-by-source (into {} (map #(let [res (:resource %)] [(resource/proj-path (:resource res)) res]) dep-build-targets))
+            deps-by-source (into {} (map #(let [res (:resource %)]
+                                            [(resource/proj-path (:resource res))
+                                             res])
+                                         dep-build-targets))
             dep-resources (into (res-fields->resources pb-msg deps-by-source [:rig-scene #_:material])
                                 (filter second (res-fields->resources pb-msg deps-by-source [[:textures]])))]
         [(bt/with-content-hash
@@ -158,6 +162,7 @@
                 gpu-texture-generators)))
 
 (g/defnk produce-scene [_node-id scene shader gpu-textures vertex-space]
+  ;; TODO: None of this works right now
   #_(if (some? scene)
     (update scene :renderable
             (fn [r]
@@ -249,21 +254,6 @@
                                   (prop-resource-error :fatal _node-id :mesh mesh "Mesh")))
             (dynamic edit-type (g/constantly {:type resource/Resource
                                               :ext model-scene/model-file-types})))
-  #_
-  (property material resource/Resource
-            (value (gu/passthrough material-resource))
-            (set (fn [evaluation-context self old-value new-value]
-                   (project/resource-setter evaluation-context self old-value new-value
-                                            [:resource :material-resource]
-                                            [:samplers :samplers]
-                                            [:build-targets :dep-build-targets]
-                                            [:shader :shader]
-                                            [:vertex-space :vertex-space])))
-            (dynamic error (g/fnk [_node-id material]
-                                  (prop-resource-error :fatal _node-id :material material "Material")))
-            (dynamic edit-type (g/constantly {:type resource/Resource
-                                              :ext "material"})))
-
   (property materials g/Any
             (value (gu/passthrough material-resources))
             (dynamic visible (g/constantly false))
@@ -288,24 +278,22 @@
             (default [])
             (dynamic visible (g/constantly false))
             (set (fn [evaluation-context self old-value new-value]
-
-                   ))
-
-            #_(value (gu/passthrough texture-resources))
-            #_(set (fn [evaluation-context self old-value new-value]
                    (let [project (project/get-project (:basis evaluation-context) self)
                          connections [[:resource :texture-resources]
                                       [:build-targets :dep-build-targets]
-                                      [:gpu-texture-generator :gpu-texture-generators]]]
+                                      [:gpu-texture-generator :gpu-texture-generators]]
+                         old-values-flat (apply concat old-value)
+                         new-values-flat (apply concat new-value)]
                      (concat
-                      (for [r old-value]
-                        (if r
-                          (project/disconnect-resource-node evaluation-context project r self connections)
-                          (g/disconnect project :nil-resource self :texture-resources)))
-                      (for [r new-value]
-                        (if r
-                          (:tx-data (project/connect-resource-node evaluation-context project r self connections))
-                          (g/connect project :nil-resource self :texture-resources))))))))
+                       (for [r old-values-flat]
+                         (if r
+                           (project/disconnect-resource-node evaluation-context project r self connections)
+                           (g/disconnect project :nil-resource self :texture-resources)))
+                       (for [r new-values-flat]
+                         (if r
+                           (:tx-data (project/connect-resource-node evaluation-context project r self connections))
+                           (g/connect project :nil-resource self :texture-resources)))))))
+            #_(value (gu/passthrough texture-resources)))
   (property skeleton resource/Resource
             (value (gu/passthrough skeleton-resource))
             (set (fn [evaluation-context self old-value new-value]
@@ -388,22 +376,46 @@
   (output _properties g/Properties :cached produce-properties))
 
 (defn load-model [project self resource pb]
-  ; TODO: Migrate the single "material" into "materials"
-  (let [#_#_materials (into {}
-                        (map-indexed (fn [i material-desc]
-                                       (let [material-res (workspace/resolve-resource resource (:material material-desc))]
-                                         {i material-res}))
-                                     (:materials pb)))]
+  (let [pb-materials (:materials pb)
+        model-materials (mapv (fn [material-desc]
+                                (workspace/resolve-resource resource (:material material-desc)))
+                              pb-materials)
+        model-textures (mapv (fn [material-desc]
+                               (mapv (fn [texture-desc]
+                                       (workspace/resolve-resource resource (:texture texture-desc)))
+                                     (:textures material-desc)))
+                             pb-materials)]
    (concat
-    (g/set-property self :name (:name pb) :default-animation (:default-animation pb))
-    #_(g/set-property self :materials materials)
-    (for [res [:mesh #_:material #_[:textures] :skeleton :animations]]
+    (g/set-property self
+      :name (:name pb)
+      :default-animation (:default-animation pb)
+      :materials model-materials
+      :textures model-textures)
+    (for [res [:mesh :skeleton :animations]]
       (if (vector? res)
         (let [res (first res)]
           (g/set-property self res (mapv #(workspace/resolve-resource resource %) (get pb res))))
         (->> (get pb res)
           (workspace/resolve-resource resource)
           (g/set-property self res)))))))
+
+(defn- sanitize-model
+  "TODO: Description"
+  [model-desc]
+  ;; Material$MaterialDesc in map format.
+  (let [model-material (:material model-desc)
+        model-textures (:textures model-desc)
+        model-materials (:materials model-desc)
+        model-textures (mapv (fn [texture]
+                               (make-texture texture ""))
+                             model-textures)
+        model-materials (if (empty? model-material)
+                          model-materials
+                          (assoc model-materials 0 (make-material "default" model-material model-textures)))]
+    (-> model-desc
+        (assoc :materials model-materials)
+        (dissoc :textures)
+        (dissoc :material))))
 
 (defn register-resource-types [workspace]
   (resource-node/register-ddf-resource-type workspace
@@ -415,4 +427,5 @@
     :icon model-icon
     :view-types [:scene :text]
     :tags #{:component}
+    :sanitize-fn sanitize-model
     :tag-opts {:component {:transform-properties #{:position :rotation}}}))

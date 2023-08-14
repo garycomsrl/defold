@@ -29,7 +29,7 @@
 
 (set! *warn-on-reflection* true)
 
-(def ^:dynamic *check-schemas* (get *compiler-options* :defold/check-schemas *assert*))
+(def ^:dynamic *check-schemas* false #_ (get *compiler-options* :defold/check-schemas *assert*))
 
 (defn trace-expr [node-id label evaluation-context label-type deferred-expr]
   (if-let [tracer (:tracer evaluation-context)]
